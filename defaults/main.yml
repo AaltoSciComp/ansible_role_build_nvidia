@@ -1,0 +1,12 @@
+kernel_version: 5.14.0
+kernel_release: 570.124.06
+kernel_dist: "el9.5"
+
+nvidia_driver_version: "570.124.06"
+nvidia_epoch: 3
+  
+nvidia_runfile_url: "https://us.download.nvidia.com/tesla/{{ nvidia_driver_version }}/NVIDIA-Linux-x86_64-{{ nvidia_driver_version }}.run"
+nvidia_precompile_repo: "https://github.com/NVIDIA/yum-packaging-precompiled-kmod.git"
+nvidia_precompile_repo_branch: "rhel9"
+  
+nvidia_work_folder: "/root/yum-packaging-precompiled-kmod/"

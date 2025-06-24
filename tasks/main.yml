@@ -1,0 +1,115 @@
+---
+
+
+    - name: Install the specified version of kernel packages with dnf
+      dnf:
+        name:
+          - python3-dnf-plugin-versionlock
+          - kernel-devel-{{ target_kernel }}
+          - kernel-headers-{{ target_kernel }}
+          - kernel-core-{{ target_kernel }}
+        state: present
+
+    - name: Prevent kernel packages from being updated
+      community.general.dnf_versionlock:
+        name:
+          - kernel-devel-{{ target_kernel }}
+          - kernel-headers-{{ target_kernel }}
+          - kernel-core-{{ target_kernel }}
+        state: present
+
+
+
+    # We are following: # https://github.com/NVIDIA/yum-packaging-precompiled-kmod
+
+
+    - name: Ensure git and other tools are installed
+      ansible.builtin.dnf:
+        name:
+          - git
+          - rpm-build
+        state: present
+
+    - name: Clone NVIDIA yum-packaging-precompiled-kmod (rhel9 branch)
+      ansible.builtin.git:
+        repo: "{{ nvidia_precompile_repo }}"
+        dest: "{{ nvidia_work_folder }}"
+        version: "{{ nvidia_precompile_repo_branch }}"
+        force: yes
+        
+
+    - name: Download NVIDIA runfile
+      ansible.builtin.get_url:
+        url: "{{ nvidia_runfile_url }}"
+        dest: "{{ nvidia_work_folder }}/{{ nvidia_runfile_url | basename }}"
+        mode: '0755'
+
+
+    - name: Ensure directories exist
+      ansible.builtin.file:
+        path: "{{ nvidia_work_folder }}/{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "nvidia-kmod-{{ nvidia_driver_version }}-x86_64"
+        - BUILD
+        - BUILDROOT
+        - RPMS
+        - SRPMS
+        - SOURCES
+        - SPECS
+        
+#    - name: Remove tmp directory if it exists
+#      ansible.builtin.file:
+#        path: "{{ nvidia_work_folder }}/tmp"
+#        state: absent
+    
+    - name: Extract NVIDIA installer
+      ansible.builtin.command: "sh NVIDIA-Linux-x86_64-{{ nvidia_driver_version }}.run --extract-only --target tmp"
+      args:
+        chdir: "{{ nvidia_work_folder }}"
+        creates: "{{ nvidia_work_folder }}/tmp"
+
+    - name: Move extracted kernel directory
+      ansible.builtin.command: "mv tmp/kernel nvidia-kmod-{{ nvidia_driver_version }}-x86_64/"
+      args:
+        chdir: "{{ nvidia_work_folder }}"
+        creates: "{{ nvidia_work_folder }}/nvidia-kmod-{{ nvidia_driver_version }}-x86_64/kernel"
+
+    - name: Create NVIDIA kmod tarball
+      ansible.builtin.command: "tar -cJf SOURCES/nvidia-kmod-{{ nvidia_driver_version }}-x86_64.tar.xz nvidia-kmod-{{ nvidia_driver_version }}-x86_64"
+      args:
+        chdir: "{{ nvidia_work_folder }}"
+        creates: "{{ nvidia_work_folder }}/SOURCES/nvidia-kmod-{{ nvidia_driver_version }}-x86_64.tar.xz"
+      
+
+    - name: Comment out install lines in kmod-nvidia.spec
+      ansible.builtin.shell: |
+        sed '/^install .*\.sig %{buildroot}/ s/^/#/' kmod-nvidia.spec > SPECS/kmod-nvidia.spec
+      args:
+        chdir: "{{ nvidia_work_folder }}"
+
+    - name: Create an empty, executable hsm_wrapper_script
+      ansible.builtin.file:
+        path: "{{ nvidia_work_folder }}/SOURCES/hsm_wrapper_script"
+        state: touch
+        mode: '0755'
+
+    - name: Build kmod NVIDIA RPM
+      ansible.builtin.command: >
+        rpmbuild
+        --define "%_topdir {{ nvidia_work_folder }}"
+        --define "debug_package %{nil}"
+        --define "kernel {{ kernel_version }}"
+        --define "kernel_release {{ kernel_release }}"
+        --define "kernel_dist .{{ kernel_dist }}"
+        --define "driver {{ nvidia_driver_version }}"
+        --define "epoch {{ nvidia_epoch }}"
+        --define "driver_branch latest"
+        --define "hsm 1"
+        --define "hsm_wrapper_script hsm_wrapper_script"
+        -v -bb SPECS/kmod-nvidia.spec
+      args:
+        chdir: "{{ nvidia_work_folder }}"
+        creates: "{{ nvidia_rpm }}"
+
