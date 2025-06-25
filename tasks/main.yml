@@ -36,7 +36,7 @@
         dest: "{{ nvidia_work_folder }}"
         version: "{{ nvidia_precompile_repo_branch }}"
         force: yes
-        
+
 
     - name: Download NVIDIA runfile
       ansible.builtin.get_url:
@@ -58,12 +58,12 @@
         - SRPMS
         - SOURCES
         - SPECS
-        
+
 #    - name: Remove tmp directory if it exists
 #      ansible.builtin.file:
 #        path: "{{ nvidia_work_folder }}/tmp"
 #        state: absent
-    
+
     - name: Extract NVIDIA installer
       ansible.builtin.command: "sh NVIDIA-Linux-x86_64-{{ nvidia_driver_version }}.run --extract-only --target tmp"
       args:
@@ -81,13 +81,17 @@
       args:
         chdir: "{{ nvidia_work_folder }}"
         creates: "{{ nvidia_work_folder }}/SOURCES/nvidia-kmod-{{ nvidia_driver_version }}-x86_64.tar.xz"
-      
+
 
     - name: Comment out install lines in kmod-nvidia.spec
-      ansible.builtin.shell: |
-        sed '/^install .*\.sig %{buildroot}/ s/^/#/' kmod-nvidia.spec > SPECS/kmod-nvidia.spec
+      ansible.builtin.shell: >-
+        sed '/^install .*\.sig %{buildroot}/ s/^/#/' kmod-nvidia.spec
+        | sed 's/^Epoch:[[:space:]]*3$/Epoch:          %{epoch}/'
+        | sed 's/^Release:[[:space:]]*3%{kmod_dist}$/Release:        %{releasenumber}%{kmod_dist}/'
+        > SPECS/kmod-nvidia.spec
       args:
         chdir: "{{ nvidia_work_folder }}"
+        creates: "{{ nvidia_work_folder }}/SPECS/kmod-nvidia.spec"
 
     - name: Create an empty, executable hsm_wrapper_script
       ansible.builtin.file:
@@ -108,6 +112,7 @@
         --define "driver_branch latest"
         --define "hsm 1"
         --define "hsm_wrapper_script hsm_wrapper_script"
+        --define "releasenumber {{ nvidia_releasenumber }}"
         -v -bb SPECS/kmod-nvidia.spec
       args:
         chdir: "{{ nvidia_work_folder }}"
