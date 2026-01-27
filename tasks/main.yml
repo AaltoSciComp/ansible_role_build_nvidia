@@ -1,5 +1,8 @@
 ---
 
+    - name: Print nvidia_use_open
+      ansible.builtin.debug:
+        msg: "nvidia_use_open: '{{ nvidia_use_open }}'."
 
     - name: Install the specified version of kernel packages with dnf
       dnf:
@@ -28,6 +31,7 @@
         name:
           - git
           - rpm-build
+          - gcc-c++
         state: present
 
     - name: Clone NVIDIA yum-packaging-precompiled-kmod (rhel9 branch)
@@ -37,12 +41,6 @@
         version: "{{ nvidia_precompile_repo_branch }}"
         force: yes
 
-
-    - name: Download NVIDIA runfile
-      ansible.builtin.get_url:
-        url: "{{ nvidia_runfile_url }}"
-        dest: "{{ nvidia_work_folder }}/{{ nvidia_runfile_url | basename }}"
-        mode: '0755'
 
 
     - name: Ensure directories exist
@@ -59,28 +57,105 @@
         - SOURCES
         - SPECS
 
-#    - name: Remove tmp directory if it exists
-#      ansible.builtin.file:
-#        path: "{{ nvidia_work_folder }}/tmp"
-#        state: absent
+    - name: prepare closed driver
+      when: not ( (nvidia_use_open | default(false)) | bool )
+      block:
 
-    - name: Extract NVIDIA installer
-      ansible.builtin.command: "sh NVIDIA-Linux-x86_64-{{ nvidia_driver_version }}.run --extract-only --target tmp"
-      args:
-        chdir: "{{ nvidia_work_folder }}"
-        creates: "{{ nvidia_work_folder }}/tmp"
+      - name: Download NVIDIA runfile
+        ansible.builtin.get_url:
+          url: "{{ nvidia_runfile_url }}"
+          dest: "{{ nvidia_work_folder }}/{{ nvidia_runfile_url | basename }}"
+          mode: '0755'
 
-    - name: Move extracted kernel directory
-      ansible.builtin.command: "mv tmp/kernel nvidia-kmod-{{ nvidia_driver_version }}-x86_64/"
-      args:
-        chdir: "{{ nvidia_work_folder }}"
-        creates: "{{ nvidia_work_folder }}/nvidia-kmod-{{ nvidia_driver_version }}-x86_64/kernel"
+      - name: Extract NVIDIA installer
+        ansible.builtin.command: "sh NVIDIA-Linux-x86_64-{{ nvidia_driver_version }}.run --extract-only --target tmp"
+        args:
+          chdir: "{{ nvidia_work_folder }}"
+          creates: "{{ nvidia_work_folder }}/tmp"
 
-    - name: Create NVIDIA kmod tarball
-      ansible.builtin.command: "tar -cJf SOURCES/nvidia-kmod-{{ nvidia_driver_version }}-x86_64.tar.xz nvidia-kmod-{{ nvidia_driver_version }}-x86_64"
-      args:
-        chdir: "{{ nvidia_work_folder }}"
-        creates: "{{ nvidia_work_folder }}/SOURCES/nvidia-kmod-{{ nvidia_driver_version }}-x86_64.tar.xz"
+      - name: Move extracted kernel directory
+        ansible.builtin.command: "mv tmp/kernel nvidia-kmod-{{ nvidia_driver_version }}-x86_64/"
+        args:
+          chdir: "{{ nvidia_work_folder }}"
+          creates: "{{ nvidia_work_folder }}/nvidia-kmod-{{ nvidia_driver_version }}-x86_64/kernel"
+
+
+      - name: Create NVIDIA kmod tarball
+        ansible.builtin.command: "tar -cJf SOURCES/nvidia-kmod-{{ nvidia_driver_version }}-x86_64.tar.xz nvidia-kmod-{{ nvidia_driver_version }}-x86_64"
+        args:
+          chdir: "{{ nvidia_work_folder }}"
+          creates: "{{ nvidia_work_folder }}/SOURCES/nvidia-kmod-{{ nvidia_driver_version }}-x86_64.tar.xz"
+
+    - name: prepare open driver
+      when:  (nvidia_use_open | default(false)) | bool
+      block:
+
+      - name: Set fake kernel file
+        ansible.builtin.lineinfile:
+          path: /etc/fake-kernel
+          state: present
+          create: true
+          # e.g. "5.14.0-570.44.1.el9_6.x86_64"
+          line: "{{ target_kernel }}"
+          owner: root
+          group: root
+          mode: '0644'
+
+      - name: Move uname to uname-bin
+        ansible.builtin.command:
+          cmd: mv /usr/bin/uname /usr/bin/uname-bin
+          creates: /usr/bin/uname-bin
+
+      - name: Copy uname wrapper
+        ansible.builtin.copy:
+          src: files/uname-wrapper.sh
+          dest: /usr/bin/uname
+          owner: root
+          group: root
+          mode: u=rwx,g=rx,o=rx
+
+      - name: Clone NVIDIA/open-gpu-kernel-modules.git
+        ansible.builtin.git:
+          repo: "https://github.com/NVIDIA/open-gpu-kernel-modules.git"
+          dest: "{{ nvidia_work_folder }}/open-gpu-kernel-modules/"
+          version: "{{ nvidia_driver_version }}"
+          force: yes
+
+      - name: Create NVIDIA open kmod tarball
+        ansible.builtin.command:
+          cmd: "tar -cJf SOURCES/nvidia-kmod-{{ nvidia_driver_version }}-x86_64.tar.xz --exclude open-gpu-kernel-modules/.git/\\* open-gpu-kernel-modules/"
+        args:
+          chdir: "{{ nvidia_work_folder }}"
+          creates: "{{ nvidia_work_folder }}/SOURCES/nvidia-kmod-{{ nvidia_driver_version }}-x86_64.tar.xz"
+
+
+      - name: "Replace %setup folder"
+        ansible.builtin.replace:
+          path: "{{ nvidia_work_folder }}/kmod-nvidia.spec"
+          regexp: '^\s*%setup -q -n %\{kmod_source_name\}\s*$'
+          replace: '%setup -q -n open-gpu-kernel-modules'
+          backup: yes
+
+      - name: Comment out 'cd kernel' right after %build
+        ansible.builtin.replace:
+          path: "{{ nvidia_work_folder }}/kmod-nvidia.spec"
+          regexp: '^(%build[^\n]*\n)(\s*)cd kernel(\s*)$'
+          replace: '\1\2# cd kernel\3'
+          backup: yes
+
+      - name: Replace make_build line right after the specific %if
+        ansible.builtin.replace:
+          path: "{{ nvidia_work_folder }}/kmod-nvidia.spec"
+          regexp: '^(%if 0%\{\?hsm\} == 0 \|\| 0%\{\?hsm\} == 1[^\n]*\n)(\s*)%\{make_build\}\s+SYSSRC=\$\{KERNEL_SOURCES\}\s+SYSOUT=\$\{KERNEL_OUTPUT\}\s*$'
+          replace: '\1\2%{make_build}\n\2cd kernel-open'
+          backup: yes
+
+      - name: Replace all occurrences of 'cd kernel' with 'cd kernel-open' unless already -open
+        ansible.builtin.replace:
+          path: "{{ nvidia_work_folder }}/kmod-nvidia.spec"
+          regexp: '\bcd\s+kernel\b(?!-open)'
+          replace: 'cd kernel-open'
+          backup: yes
 
 
     - name: Comment out install lines in kmod-nvidia.spec
@@ -117,4 +192,3 @@
       args:
         chdir: "{{ nvidia_work_folder }}"
         creates: "{{ nvidia_rpm }}"
-

@@ -11,3 +11,7 @@ nvidia_precompile_repo: "https://github.com/NVIDIA/yum-packaging-precompiled-kmo
 nvidia_precompile_repo_branch: "rhel9"
   
 nvidia_work_folder: "/root/yum-packaging-precompiled-kmod/"
+
+target_kernel: "5.14.0-570.44.1.el9_6.x86_64"
+
+nvidia_use_open: false
