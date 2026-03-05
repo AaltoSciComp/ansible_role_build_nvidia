@@ -49,7 +49,7 @@
         state: directory
         mode: '0755'
       loop:
-        - "nvidia-kmod-{{ nvidia_driver_version }}-x86_64"
+        - "nvidia-kmod-{{ nvidia_driver_version }}-{{ nvidia_arch }}"
         - BUILD
         - BUILDROOT
         - RPMS
@@ -68,23 +68,23 @@
           mode: '0755'
 
       - name: Extract NVIDIA installer
-        ansible.builtin.command: "sh NVIDIA-Linux-x86_64-{{ nvidia_driver_version }}.run --extract-only --target tmp"
+        ansible.builtin.command: "sh NVIDIA-Linux-{{ nvidia_arch }}-{{ nvidia_driver_version }}.run --extract-only --target tmp"
         args:
           chdir: "{{ nvidia_work_folder }}"
           creates: "{{ nvidia_work_folder }}/tmp"
 
       - name: Move extracted kernel directory
-        ansible.builtin.command: "mv tmp/kernel nvidia-kmod-{{ nvidia_driver_version }}-x86_64/"
+        ansible.builtin.command: "mv tmp/kernel nvidia-kmod-{{ nvidia_driver_version }}-{{ nvidia_arch }}/"
         args:
           chdir: "{{ nvidia_work_folder }}"
-          creates: "{{ nvidia_work_folder }}/nvidia-kmod-{{ nvidia_driver_version }}-x86_64/kernel"
+          creates: "{{ nvidia_work_folder }}/nvidia-kmod-{{ nvidia_driver_version }}-{{ nvidia_arch }}/kernel"
 
 
       - name: Create NVIDIA kmod tarball
-        ansible.builtin.command: "tar -cJf SOURCES/nvidia-kmod-{{ nvidia_driver_version }}-x86_64.tar.xz nvidia-kmod-{{ nvidia_driver_version }}-x86_64"
+        ansible.builtin.command: "tar -cJf SOURCES/nvidia-kmod-{{ nvidia_driver_version }}-{{ nvidia_arch }}.tar.xz nvidia-kmod-{{ nvidia_driver_version }}-{{ nvidia_arch }}"
         args:
           chdir: "{{ nvidia_work_folder }}"
-          creates: "{{ nvidia_work_folder }}/SOURCES/nvidia-kmod-{{ nvidia_driver_version }}-x86_64.tar.xz"
+          creates: "{{ nvidia_work_folder }}/SOURCES/nvidia-kmod-{{ nvidia_driver_version }}-{{ nvidia_arch }}.tar.xz"
 
     - name: prepare open driver
       when:  (nvidia_use_open | default(false)) | bool
@@ -123,10 +123,10 @@
 
       - name: Create NVIDIA open kmod tarball
         ansible.builtin.command:
-          cmd: "tar -cJf SOURCES/nvidia-kmod-{{ nvidia_driver_version }}-x86_64.tar.xz --exclude open-gpu-kernel-modules/.git/\\* open-gpu-kernel-modules/"
+          cmd: "tar -cJf SOURCES/nvidia-kmod-{{ nvidia_driver_version }}-{{ nvidia_arch }}.tar.xz --exclude open-gpu-kernel-modules/.git/\\* open-gpu-kernel-modules/"
         args:
           chdir: "{{ nvidia_work_folder }}"
-          creates: "{{ nvidia_work_folder }}/SOURCES/nvidia-kmod-{{ nvidia_driver_version }}-x86_64.tar.xz"
+          creates: "{{ nvidia_work_folder }}/SOURCES/nvidia-kmod-{{ nvidia_driver_version }}-{{ nvidia_arch }}.tar.xz"
 
 
       - name: "Replace %setup folder"
