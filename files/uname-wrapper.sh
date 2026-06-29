@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 REAL_KERNEL=$(/usr/bin/uname-bin -r)
 
